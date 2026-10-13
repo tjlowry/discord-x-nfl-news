@@ -25,7 +25,7 @@ The workflow commits `seen.json` back to the repo after each run that changes it
 
 ### Schedule and Actions minutes
 
-The workflow runs every 5 minutes (`*/5 * * * *`), GitHub's minimum. A list
+The workflow runs every 5 minutes (`2-59/5 * * * *`), GitHub's minimum. A list
 feed only shows its newest ~20 tweets, so the more accounts on the list, the
 more often the bot needs to check. If a run logs "tweets may have been missed",
 the feed turned over faster than that; split the list into two feeds.
