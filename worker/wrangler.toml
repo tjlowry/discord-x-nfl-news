@@ -1,0 +1,9 @@
+# Only needed if deploying with the Wrangler CLI (`npx wrangler deploy` from this folder).
+# Dashboard users can ignore this file. See README → "Reliable scheduling".
+name = "discord-x-bot-cron"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+workers_dev = false   # no public URL
+
+[triggers]
+crons = ["*/5 * * * *"]

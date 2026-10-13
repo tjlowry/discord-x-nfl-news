@@ -38,6 +38,41 @@ GitHub doesn't guarantee cron timing; runs are often a few minutes late, and
 scheduled workflows are disabled after 60 days without repo activity (the
 `seen.json` commits count as activity as long as tweets keep arriving).
 
+### Reliable scheduling (Cloudflare Worker)
+
+GitHub's `schedule:` trigger can be late, skip runs, or (as with this repo) never
+fire at all. `worker/worker.js` is a Cloudflare Worker that starts the `poll`
+workflow every 5 minutes through GitHub's API. The GitHub cron stays in place;
+if both fire, the workflow's concurrency group drops the extra run.
+
+1. **GitHub token**: github.com → Settings → Developer settings → Personal
+   access tokens → *Fine-grained tokens* → *Generate new token*.
+   - Repository access: *Only select repositories* → this repo.
+   - Permissions: **Actions → Read and write**. Nothing else.
+   - Pick an expiration and put a renewal reminder on your calendar.
+
+   This token can only start, cancel, or re-run this repo's workflows. It can't
+   read secrets (the Discord webhook) or change code.
+2. **Create the Worker**: Cloudflare dashboard → *Workers & Pages* → *Create* →
+   start from *Hello World* → *Deploy*. Then *Edit code*, replace everything
+   with the contents of `worker/worker.js`, and *Deploy* again.
+3. **Add the secret**: the Worker's *Settings* → *Variables and Secrets* →
+   *Add* → type **Secret**, name `GH_TOKEN`, value = the token.
+4. **Add the schedule**: *Settings* → *Triggers* → *Cron Triggers* → *Add* →
+   `*/5 * * * *`.
+5. *(Optional)* *Settings* → *Domains & Routes* → disable the `workers.dev`
+   URL. The Worker only acts on the cron, so it doesn't need one.
+
+Within ~5 minutes, runs should appear under *Actions* in this repo. If they
+don't, check the Worker's logs (or the cron trigger's past events) in Cloudflare:
+failures say why, e.g. `HTTP 401 (token invalid or expired ...)`.
+
+**When the token expires**, runs stop. Make a new token (step 1) and replace
+the `GH_TOKEN` secret (step 3).
+
+Deploying with the CLI instead: `cd worker && npx wrangler deploy && npx wrangler secret put GH_TOKEN`
+(uses `worker/wrangler.toml`, which already includes the cron).
+
 ## Adding accounts
 
 **Easiest: add them to the X List.** The `cards-list` feed is an X List turned
@@ -105,6 +140,10 @@ Run the tests (no network access):
 
 ```bash
 .venv/bin/pytest
+```
+
+```bash
+node --test worker/
 ```
 
 To actually post from your machine, set `DISCORD_WEBHOOK_URL` in your
