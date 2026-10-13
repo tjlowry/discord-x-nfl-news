@@ -7,5 +7,5 @@
 # different status IDs in each and would be posted twice.
 feeds:
   - name: cards-list
-    url: https://rss.app/feeds/387txf5LodANzguJ.xml
+    url: https://rss.app/feeds/gvNbPZAUR48CZy1Q.xml
     skip_replies: true
