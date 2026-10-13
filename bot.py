@@ -243,6 +243,12 @@ def process_feed(feed, entries, seen, webhook_url, session, dry_run=False, sleep
     elsewhere = {i for k, ids in seen.items() if k != key for i in ids}
     already = set(seen[key])
     unseen = [i for i in items if i not in already]
+    # If nothing in the feed was seen before and the oldest item is newer than
+    # everything we've seen, the feed rolled past us and tweets were likely missed.
+    if already and items and len(unseen) == len(items):
+        if min(map(int, items)) > max(map(int, already)):
+            log.warning("%s: no overlap with last run; tweets may have been missed "
+                        "(poll more often or split the feed)", key)
     dupes = [i for i in unseen if i in elsewhere]
     new_ids = sorted((i for i in unseen if i not in elsewhere), key=int)
     if not dry_run:

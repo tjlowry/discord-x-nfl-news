@@ -331,3 +331,17 @@ def test_tweet_seen_via_another_feed_is_not_reposted():
     assert n == 1
     assert posted_links(s) == ["https://fixupx.com/KSzn2021/status/2"]
     assert sorted(seen["KSzn2021"]) == ["1", "2"]
+
+
+def test_warns_when_feed_rolled_past_last_seen(caplog):
+    seen = {"alice": ["1", "2"]}
+    s = session_with(*[response()] * 2)
+    bot.process_feed(feed(), [entry(5), entry(6)], seen, WEBHOOK, s, sleep=lambda _: None)
+    assert "may have been missed" in caplog.text
+
+
+def test_no_warning_when_feed_overlaps(caplog):
+    seen = {"alice": ["1", "2"]}
+    s = session_with(response())
+    bot.process_feed(feed(), [entry(2), entry(3)], seen, WEBHOOK, s, sleep=lambda _: None)
+    assert "may have been missed" not in caplog.text

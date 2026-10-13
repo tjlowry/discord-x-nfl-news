@@ -1,7 +1,7 @@
 # discord-x-bot
 
 Posts new tweets from a list of X accounts to a Discord channel as
-`fixupx.com` links, so videos play inline. Runs every 15 minutes on GitHub
+`fixupx.com` links, so videos play inline. Runs every 5 minutes on GitHub
 Actions — no server, no X API.
 
 Tweets come from RSS feeds (RSS.app, RSSHub, Nitter, etc.). Any feed works as
@@ -25,11 +25,14 @@ The workflow commits `seen.json` back to the repo after each run that changes it
 
 ### Schedule and Actions minutes
 
-The workflow runs every 15 minutes (`*/15 * * * *`).
+The workflow runs every 5 minutes (`*/5 * * * *`), GitHub's minimum. A list
+feed only shows its newest ~20 tweets, so the more accounts on the list, the
+more often the bot needs to check. If a run logs "tweets may have been missed",
+the feed turned over faster than that; split the list into two feeds.
 
-- **Public repo**: Actions minutes are unlimited.
-- **Private repo**: the free tier is 2,000 minutes/month, and `*/15` uses about
-  that much. Change the cron in `.github/workflows/poll.yml` to `*/30 * * * *`.
+- **Public repo** (this one): Actions minutes are unlimited.
+- **Private repo**: the free tier is 2,000 minutes/month, which only covers
+  about `*/30 * * * *`. Change the cron in `.github/workflows/poll.yml`.
 
 GitHub doesn't guarantee cron timing; runs are often a few minutes late, and
 scheduled workflows are disabled after 60 days without repo activity (the
