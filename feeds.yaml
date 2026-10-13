@@ -1,0 +1,9 @@
+# One entry per X account. Adding an account = adding an entry here.
+feeds:
+  - handle: example1
+    url: https://rss.app/feeds/xxxx.xml
+
+  - handle: example2
+    url: https://rss.app/feeds/yyyy.xml
+    skip_replies: true      # optional, default false
+    skip_retweets: true     # optional, default false
