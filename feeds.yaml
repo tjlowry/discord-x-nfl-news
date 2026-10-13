@@ -1,8 +1,11 @@
-# One entry per X account. Adding an account = adding an entry here.
+# Two kinds of entries:
+#   handle: <account>   a feed for one X account; posts as that account
+#   name:   <label>     a multi-account feed (e.g. an X List); posts as each tweet's author
 # Options (both default false): skip_replies, skip_retweets
+#
+# Don't give an account its own feed if it's also in a list feed: retweets carry
+# different status IDs in each and would be posted twice.
 feeds:
-  - handle: KSzn2021
-    url: https://rss.app/feeds/YIltl2KymVQgRI6b.xml
-
-  - handle: BoBrack
-    url: https://rss.app/feeds/ycTNkS0I9ribwLgu.xml
+  - name: cards-list
+    url: https://rss.app/feeds/387txf5LodANzguJ.xml
+    skip_replies: true

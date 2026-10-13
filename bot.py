@@ -29,6 +29,9 @@ USER_AGENT = "discord-x-bot/1.0 (+https://github.com/)"
 
 STATUS_RE = re.compile(r"/([A-Za-z0-9_]{1,15})/status/(\d+)")
 HANDLE_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
+# X List feeds from RSS.app prefix titles with the author's display name:
+# "Jace: RT @SharpFootball: ..." / "Jace: @someone thanks".
+DISPLAY_PREFIX_RE = re.compile(r"^[^:\n]{1,60}:\s+(?=RT |R to @|@)")
 
 log = logging.getLogger("bot")
 
@@ -62,10 +65,17 @@ def _norm(handle):
     return (handle or "").strip().lstrip("@").lower()
 
 
-def is_retweet(entry, feed_handle):
-    title = entry.get("title") or ""
-    if title.startswith("RT ") or title.startswith("RT @"):
+def _title(entry):
+    title = (entry.get("title") or "").lstrip()
+    return DISPLAY_PREFIX_RE.sub("", title, count=1)
+
+
+def is_retweet(entry, feed_handle=None):
+    if _title(entry).startswith("RT "):
         return True
+    if not feed_handle:
+        # Multi-account (list) feed: authors legitimately differ per entry.
+        return False
     # Retweets usually link to the original author's status.
     parsed = parse_link(entry.get("link"))
     if parsed and _norm(parsed[0]) != _norm(feed_handle):
@@ -80,7 +90,7 @@ def is_retweet(entry, feed_handle):
 
 
 def is_reply(entry):
-    title = (entry.get("title") or "").lstrip()
+    title = _title(entry)
     return title.startswith("@") or title.startswith("R to @")
 
 
@@ -103,14 +113,23 @@ def load_config(path=FEEDS_PATH):
     for i, f in enumerate(feeds):
         if not isinstance(f, dict):
             raise ConfigError(f"feeds[{i}] must be a mapping")
-        handle = str(f.get("handle") or "").lstrip("@")
+        handle = str(f.get("handle") or "").lstrip("@") or None
+        name = str(f.get("name") or "").strip() or None
         url = f.get("url")
-        if not HANDLE_RE.match(handle):
+        if handle and name:
+            raise ConfigError(f"feeds[{i}] must have 'handle' or 'name', not both")
+        if handle and not HANDLE_RE.match(handle):
             raise ConfigError(f"feeds[{i}] has an invalid handle: {f.get('handle')!r}")
+        if not handle and not name:
+            raise ConfigError(f"feeds[{i}] needs a 'handle' (one account) or 'name' (list feed)")
+        key = handle or name
+        if key in {r["key"] for r in result}:
+            raise ConfigError(f"feeds[{i}]: duplicate feed {key!r}")
         if not url or not isinstance(url, str):
-            raise ConfigError(f"feeds[{i}] ({handle}) is missing 'url'")
+            raise ConfigError(f"feeds[{i}] ({key}) is missing 'url'")
         result.append(
             {
+                "key": key,
                 "handle": handle,
                 "url": url,
                 "skip_replies": bool(f.get("skip_replies", False)),
@@ -188,33 +207,46 @@ def _retry_after(resp):
 
 
 def collect(entries, feed):
-    """Return {status_id: link} for entries that pass parsing and filters."""
+    """Return {status_id: (link, username)} for entries that pass parsing and filters.
+
+    Single-account feeds post as the feed's handle; list feeds (no handle) post
+    as each tweet's author.
+    """
     out = {}
     for entry in entries:
-        link = fixup_link(entry.get("link"))
-        if not link:
+        parsed = parse_link(entry.get("link"))
+        if not parsed:
             continue
         if feed["skip_retweets"] and is_retweet(entry, feed["handle"]):
             continue
         if feed["skip_replies"] and is_reply(entry):
             continue
-        out[parse_link(link)[1]] = link
+        author, status_id = parsed
+        link = f"https://fixupx.com/{author}/status/{status_id}"
+        out[status_id] = (link, feed["handle"] or author)
     return out
 
 
 def process_feed(feed, entries, seen, webhook_url, session, dry_run=False, sleep=time.sleep):
     """Handle one feed's entries, mutating `seen` in place. Returns posted count."""
-    handle = feed["handle"]
+    key = feed["key"]
     items = collect(entries, feed)
 
-    if handle not in seen:
+    if key not in seen:
         if not dry_run:
-            seen[handle] = list(items)
-        log.info("%s: seeded %d entries", handle, len(items))
+            seen[key] = list(items)
+        log.info("%s: seeded %d entries", key, len(items))
         return 0
 
-    already = set(seen[handle])
-    new_ids = sorted((i for i in items if i not in already), key=int)
+    # Tweets already handled via another feed (e.g. an account that is both in
+    # a list feed and has its own feed) are marked seen here but not reposted.
+    elsewhere = {i for k, ids in seen.items() if k != key for i in ids}
+    already = set(seen[key])
+    unseen = [i for i in items if i not in already]
+    dupes = [i for i in unseen if i in elsewhere]
+    new_ids = sorted((i for i in unseen if i not in elsewhere), key=int)
+    if not dry_run:
+        seen[key].extend(dupes)
     if not new_ids:
         return 0
 
@@ -223,23 +255,23 @@ def process_feed(feed, entries, seen, webhook_url, session, dry_run=False, sleep
         # Keep the newest ones; the backlog is marked seen without posting.
         skipped, new_ids = new_ids[:-MAX_POSTS_PER_FEED], new_ids[-MAX_POSTS_PER_FEED:]
         log.info("%s: %d new entries exceed cap of %d; skipping %d oldest",
-                 handle, len(skipped) + len(new_ids), MAX_POSTS_PER_FEED, len(skipped))
+                 key, len(skipped) + len(new_ids), MAX_POSTS_PER_FEED, len(skipped))
 
     posted = 0
     for n, status_id in enumerate(new_ids):
-        link = items[status_id]
+        link, username = items[status_id]
         if dry_run:
-            print(f"[dry-run] would post {link} as @{handle}")
+            print(f"[dry-run] would post {link} as @{username}")
             continue
         if n:
             sleep(POST_DELAY)
-        if post_to_discord(webhook_url, link, handle, session, sleep=sleep):
-            seen[handle].append(status_id)
+        if post_to_discord(webhook_url, link, username, session, sleep=sleep):
+            seen[key].append(status_id)
             posted += 1
-            log.info("%s: posted %s", handle, link)
+            log.info("%s: posted %s", key, link)
 
     if not dry_run:
-        seen[handle].extend(skipped)
+        seen[key].extend(skipped)
     return posted
 
 
@@ -249,7 +281,7 @@ def run(feeds, seen, webhook_url, session, dry_run=False, sleep=time.sleep):
         try:
             entries = fetch_entries(feed["url"], session)
         except Exception as e:
-            log.warning("%s: fetch failed: %s", feed["handle"], e)
+            log.warning("%s: fetch failed: %s", feed["key"], e)
             continue
         total += process_feed(feed, entries, seen, webhook_url, session, dry_run, sleep)
     return total

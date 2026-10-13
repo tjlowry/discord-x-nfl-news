@@ -5,7 +5,8 @@ Posts new tweets from a list of X accounts to a Discord channel as
 Actions — no server, no X API.
 
 Tweets come from RSS feeds (RSS.app, RSSHub, Nitter, etc.). Any feed works as
-long as item links contain `/<handle>/status/<id>`.
+long as item links contain `/<handle>/status/<id>`. A feed can cover one account
+or many (an X List turned into a single RSS.app feed).
 
 ## Setup
 
@@ -34,23 +35,39 @@ GitHub doesn't guarantee cron timing; runs are often a few minutes late, and
 scheduled workflows are disabled after 60 days without repo activity (the
 `seen.json` commits count as activity as long as tweets keep arriving).
 
-## Adding an account
+## Adding accounts
 
-Add an entry to `feeds.yaml` and commit. No code changes needed:
+**Easiest: add them to the X List.** The `cards-list` feed is an X List turned
+into one RSS.app feed, so adding an account to the list on X is all it takes.
+Nothing changes in this repo.
+
+**Or add a feed** to `feeds.yaml` and commit. No code changes needed:
 
 ```yaml
 feeds:
+  # one account: posts as that account
   - handle: someaccount
     url: https://rss.app/feeds/abcd1234.xml
     skip_replies: true      # optional, default false
     skip_retweets: true     # optional, default false
+
+  # many accounts (an X List): posts as each tweet's author
+  - name: my-list
+    url: https://rss.app/feeds/efgh5678.xml
 ```
 
-The next run seeds the new account and then posts its new tweets from then on.
+The next run seeds the new feed and then posts its new tweets from then on.
+
+Don't give an account its own feed if it's also in a list feed. A tweet that
+appears in both is only posted once, but retweets carry a different status ID
+in each feed, so they would be posted twice.
 
 - `skip_replies` drops items whose title starts with `@` or `R to @`.
-- `skip_retweets` drops items whose title starts with `RT `, whose link points
-  to a different account, or whose author field is a different `@handle`.
+- `skip_retweets` drops items whose title starts with `RT `. On single-account
+  feeds it also drops items whose link points to a different account, or whose
+  author field is a different `@handle`.
+- List feeds from RSS.app prefix titles with the display name ("Jace: RT @…");
+  the filters ignore that prefix.
 
 ## Behavior
 

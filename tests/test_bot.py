@@ -13,8 +13,12 @@ WEBHOOK = "https://discord.test/api/webhooks/1/abc"
 
 
 def feed(handle="alice", **kw):
-    return {"handle": handle, "url": "https://rss.test/feed.xml",
+    return {"key": handle, "handle": handle, "url": "https://rss.test/feed.xml",
             "skip_replies": False, "skip_retweets": False, **kw}
+
+
+def list_feed(name="cards", **kw):
+    return {**feed(**kw), "key": name, "handle": None}
 
 
 def entry(status_id, handle="alice", title="hello", author=None):
@@ -250,11 +254,21 @@ def test_load_seen_missing_file(tmp_path):
 def test_load_config(tmp_path):
     p = tmp_path / "feeds.yaml"
     p.write_text("feeds:\n  - handle: '@alice'\n    url: https://a\n    skip_replies: true\n")
-    assert bot.load_config(p) == [{"handle": "alice", "url": "https://a",
+    assert bot.load_config(p) == [{"key": "alice", "handle": "alice", "url": "https://a",
                                    "skip_replies": True, "skip_retweets": False}]
 
 
+def test_load_config_list_feed(tmp_path):
+    p = tmp_path / "feeds.yaml"
+    p.write_text("feeds:\n  - name: cards\n    url: https://l\n")
+    assert bot.load_config(p) == [{"key": "cards", "handle": None, "url": "https://l",
+                                   "skip_replies": False, "skip_retweets": False}]
+
+
 @pytest.mark.parametrize("text", ["", "feeds: []", "feeds:\n  - handle: alice\n",
+                                  "feeds:\n  - url: https://a\n",
+                                  "feeds:\n  - {handle: a, name: b, url: x}\n",
+                                  "feeds:\n  - {handle: a, url: x}\n  - {handle: a, url: y}\n",
                                   "feeds:\n  - handle: 'bad handle!'\n    url: x\n"])
 def test_load_config_invalid(tmp_path, text):
     p = tmp_path / "feeds.yaml"
@@ -278,3 +292,42 @@ def test_fetch_entries_parses_rss():
     entries = bot.fetch_entries("https://rss.test", s)
     assert bot.fixup_link(entries[0].link) == "https://fixupx.com/alice/status/42"
     assert s.get.call_args.kwargs["timeout"] == bot.FETCH_TIMEOUT
+
+
+# --- list feeds ------------------------------------------------------------
+
+
+def test_list_feed_posts_as_each_author():
+    seen = {"cards": []}
+    s = session_with(response(), response())
+    entries = [entry(2, handle="AzJace", author="@AzJace", title="Jace: draft notes"),
+               entry(1, handle="KSzn2021", author="@KSzn2021", title="K1SinceDay1: MHJ")]
+    n = bot.process_feed(list_feed(skip_retweets=True), entries, seen, WEBHOOK, s,
+                         sleep=lambda _: None)
+    assert n == 2
+    assert [c.kwargs["json"] for c in s.post.call_args_list] == [
+        {"content": "https://fixupx.com/KSzn2021/status/1", "username": "@KSzn2021"},
+        {"content": "https://fixupx.com/AzJace/status/2", "username": "@AzJace"},
+    ]
+
+
+def test_list_feed_filters_strip_display_name_prefix():
+    entries = [
+        entry(1, handle="AzJace", title="Jace: Zereoue Williams continues to rise"),
+        entry(2, handle="AzJace", title="Jace: RT @SharpFootball: #31 team is 5-0"),
+        entry(3, handle="AzJace", title="Jace: @JohnnyVenerable @KSzn2021 lol"),
+        entry(4, handle="Joe", title="Johnny Venerable: @KSzn2021 Correct."),
+        entry(5, handle="Pat", title="Breaking: Cardinals sign a kicker"),
+    ]
+    got = bot.collect(entries, list_feed(skip_retweets=True, skip_replies=True))
+    assert sorted(got, key=int) == ["1", "5"]
+
+
+def test_tweet_seen_via_another_feed_is_not_reposted():
+    seen = {"cards": ["1"], "KSzn2021": []}
+    s = session_with(response())
+    n = bot.process_feed(feed("KSzn2021"), [entry(1, handle="KSzn2021"), entry(2, handle="KSzn2021")],
+                         seen, WEBHOOK, s, sleep=lambda _: None)
+    assert n == 1
+    assert posted_links(s) == ["https://fixupx.com/KSzn2021/status/2"]
+    assert sorted(seen["KSzn2021"]) == ["1", "2"]
