@@ -184,6 +184,7 @@ def test_skip_retweets():
     entries = [
         entry(1, title="normal tweet"),
         entry(2, title="RT @bob: something"),
+        entry(7, title="RT by @alice: quoted from bob"),  # Nitter/RSS.app style
         entry(3, handle="bob", title="original by bob"),  # link points elsewhere
         entry(4, author="@bob"),
         entry(5, author="Alice Display Name"),  # display name is not a handle

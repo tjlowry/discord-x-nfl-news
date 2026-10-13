@@ -1,9 +1,8 @@
 # One entry per X account. Adding an account = adding an entry here.
+# Options (both default false): skip_replies, skip_retweets
 feeds:
-  - handle: example1
-    url: https://rss.app/feeds/xxxx.xml
+  - handle: KSzn2021
+    url: https://rss.app/feeds/YIltl2KymVQgRI6b.xml
 
-  - handle: example2
-    url: https://rss.app/feeds/yyyy.xml
-    skip_replies: true      # optional, default false
-    skip_retweets: true     # optional, default false
+  - handle: BoBrack
+    url: https://rss.app/feeds/ycTNkS0I9ribwLgu.xml
