@@ -6,4 +6,4 @@ compatibility_date = "2026-01-01"
 workers_dev = false   # no public URL
 
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["7 13,18,23 * * *"]

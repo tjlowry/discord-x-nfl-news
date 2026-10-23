@@ -2,10 +2,16 @@
 #   handle: <account>   a feed for one X account; posts as that account
 #   name:   <label>     a multi-account feed (e.g. an X List); posts as each tweet's author
 # Options (both default false): skip_replies, skip_retweets
+# url can be a single URL or a list: the bot tries them in order and uses the
+# first that works (handy for Nitter mirrors, which come and go).
 #
 # Don't give an account its own feed if it's also in a list feed: retweets carry
 # different status IDs in each and would be posted twice.
 feeds:
   - name: cards-list
-    url: https://rss.app/feeds/gvNbPZAUR48CZy1Q.xml
+    url:
+      # Nitter mirrors of X List 2110015776887378005 (x.com/i/lists/2110015776887378005).
+      # Healthy mirrors: https://github.com/zedeus/nitter/wiki/Instances
+      - https://nitter.kareem.one/i/lists/2110015776887378005/rss
+      - https://nuku.trabun.org/i/lists/2110015776887378005/rss
     skip_replies: true

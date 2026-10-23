@@ -2,7 +2,7 @@
 // GitHub's own `schedule:` trigger is unreliable, so this does the scheduling.
 //
 // Secret:  GH_TOKEN  fine-grained PAT, this repo only, Actions: read & write
-// Trigger: cron "*/5 * * * *" (set in wrangler.toml or the dashboard)
+// Trigger: cron "7 13,18,23 * * *" (set in wrangler.toml or the dashboard)
 //
 // No fetch handler on purpose: the Worker's URL can't be used to trigger runs.
 

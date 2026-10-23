@@ -21,7 +21,7 @@ SEEN_PATH = ROOT / "seen.json"
 
 FETCH_TIMEOUT = 20
 POST_TIMEOUT = 15
-MAX_POSTS_PER_FEED = 10
+MAX_POSTS_PER_FEED = 50
 MAX_SEEN_PER_HANDLE = 500
 MAX_POST_ATTEMPTS = 3
 POST_DELAY = 1.0
@@ -115,7 +115,8 @@ def load_config(path=FEEDS_PATH):
             raise ConfigError(f"feeds[{i}] must be a mapping")
         handle = str(f.get("handle") or "").lstrip("@") or None
         name = str(f.get("name") or "").strip() or None
-        url = f.get("url")
+        raw = f.get("url")
+        urls = [raw] if isinstance(raw, str) else raw
         if handle and name:
             raise ConfigError(f"feeds[{i}] must have 'handle' or 'name', not both")
         if handle and not HANDLE_RE.match(handle):
@@ -125,13 +126,14 @@ def load_config(path=FEEDS_PATH):
         key = handle or name
         if key in {r["key"] for r in result}:
             raise ConfigError(f"feeds[{i}]: duplicate feed {key!r}")
-        if not url or not isinstance(url, str):
-            raise ConfigError(f"feeds[{i}] ({key}) is missing 'url'")
+        if (not isinstance(urls, list) or not urls
+                or not all(isinstance(u, str) and u.strip() for u in urls)):
+            raise ConfigError(f"feeds[{i}] ({key}) needs a 'url' (or a list of fallback urls)")
         result.append(
             {
                 "key": key,
                 "handle": handle,
-                "url": url,
+                "urls": [u.strip() for u in urls],
                 "skip_replies": bool(f.get("skip_replies", False)),
                 "skip_retweets": bool(f.get("skip_retweets", False)),
             }
@@ -170,6 +172,19 @@ def fetch_entries(url, session):
     if parsed.bozo and not parsed.entries:
         raise ValueError(f"unparseable feed: {parsed.get('bozo_exception')}")
     return parsed.entries
+
+
+def fetch_with_fallback(urls, session):
+    """Try each URL in order; return entries from the first that works."""
+    errors = []
+    for url in urls:
+        try:
+            return fetch_entries(url, session)
+        except Exception as e:
+            errors.append(f"{url}: {e}")
+            if len(urls) > 1:
+                log.warning("fetch failed, trying next url: %s: %s", url, e)
+    raise RuntimeError("all urls failed: " + " | ".join(errors))
 
 
 def post_to_discord(webhook_url, link, handle, session, sleep=time.sleep):
@@ -285,7 +300,7 @@ def run(feeds, seen, webhook_url, session, dry_run=False, sleep=time.sleep):
     total = 0
     for feed in feeds:
         try:
-            entries = fetch_entries(feed["url"], session)
+            entries = fetch_with_fallback(feed["urls"], session)
         except Exception as e:
             log.warning("%s: fetch failed: %s", feed["key"], e)
             continue

@@ -13,7 +13,7 @@ WEBHOOK = "https://discord.test/api/webhooks/1/abc"
 
 
 def feed(handle="alice", **kw):
-    return {"key": handle, "handle": handle, "url": "https://rss.test/feed.xml",
+    return {"key": handle, "handle": handle, "urls": ["https://rss.test/feed.xml"],
             "skip_replies": False, "skip_retweets": False, **kw}
 
 
@@ -154,16 +154,18 @@ def test_sleeps_between_posts():
 
 
 def test_cap_per_run():
+    cap = bot.MAX_POSTS_PER_FEED
+    total = cap + 5
     seen = {"alice": []}
-    s = session_with(*[response()] * 15)
-    entries = [entry(i) for i in range(1, 16)]
+    s = session_with(*[response()] * total)
+    entries = [entry(i) for i in range(1, total + 1)]
     n = bot.process_feed(feed(), entries, seen, WEBHOOK, s, sleep=lambda _: None)
-    assert n == 10
-    assert s.post.call_count == 10
-    # newest 10 posted oldest-first; older backlog marked seen without posting
-    assert posted_links(s)[0].endswith("/6")
-    assert posted_links(s)[-1].endswith("/15")
-    assert set(seen["alice"]) == {str(i) for i in range(1, 16)}
+    assert n == cap
+    assert s.post.call_count == cap
+    # newest `cap` posted oldest-first; older backlog marked seen without posting
+    assert posted_links(s)[0].endswith(f"/{total - cap + 1}")
+    assert posted_links(s)[-1].endswith(f"/{total}")
+    assert set(seen["alice"]) == {str(i) for i in range(1, total + 1)}
 
 
 def test_dry_run_posts_nothing_and_marks_nothing(capsys):
@@ -227,7 +229,7 @@ def test_bad_feed_does_not_stop_others(monkeypatch):
         return [entry(2, handle="bob")]
 
     monkeypatch.setattr(bot, "fetch_entries", fake_fetch)
-    feeds = [feed("alice", url="https://bad.test"), feed("bob", url="https://good.test")]
+    feeds = [feed("alice", urls=["https://bad.test"]), feed("bob", urls=["https://good.test"])]
     seen = {"alice": [], "bob": ["1"]}
     s = session_with(response())
     total = bot.run(feeds, seen, WEBHOOK, s, sleep=lambda _: None)
@@ -254,19 +256,21 @@ def test_load_seen_missing_file(tmp_path):
 def test_load_config(tmp_path):
     p = tmp_path / "feeds.yaml"
     p.write_text("feeds:\n  - handle: '@alice'\n    url: https://a\n    skip_replies: true\n")
-    assert bot.load_config(p) == [{"key": "alice", "handle": "alice", "url": "https://a",
+    assert bot.load_config(p) == [{"key": "alice", "handle": "alice", "urls": ["https://a"],
                                    "skip_replies": True, "skip_retweets": False}]
 
 
 def test_load_config_list_feed(tmp_path):
     p = tmp_path / "feeds.yaml"
     p.write_text("feeds:\n  - name: cards\n    url: https://l\n")
-    assert bot.load_config(p) == [{"key": "cards", "handle": None, "url": "https://l",
+    assert bot.load_config(p) == [{"key": "cards", "handle": None, "urls": ["https://l"],
                                    "skip_replies": False, "skip_retweets": False}]
 
 
 @pytest.mark.parametrize("text", ["", "feeds: []", "feeds:\n  - handle: alice\n",
                                   "feeds:\n  - url: https://a\n",
+                                  "feeds:\n  - {name: l, url: []}\n",
+                                  "feeds:\n  - {name: l, url: [https://a, '']}\n",
                                   "feeds:\n  - {handle: a, name: b, url: x}\n",
                                   "feeds:\n  - {handle: a, url: x}\n  - {handle: a, url: y}\n",
                                   "feeds:\n  - handle: 'bad handle!'\n    url: x\n"])
@@ -345,3 +349,48 @@ def test_no_warning_when_feed_overlaps(caplog):
     s = session_with(response())
     bot.process_feed(feed(), [entry(2), entry(3)], seen, WEBHOOK, s, sleep=lambda _: None)
     assert "may have been missed" not in caplog.text
+
+
+# --- fallback urls ---------------------------------------------------------
+
+
+def test_load_config_url_list(tmp_path):
+    p = tmp_path / "feeds.yaml"
+    p.write_text("feeds:\n  - name: cards\n    url:\n      - https://a\n      - https://b\n")
+    assert bot.load_config(p)[0]["urls"] == ["https://a", "https://b"]
+
+
+def test_fallback_uses_next_url_when_first_fails(monkeypatch):
+    tried = []
+
+    def fake_fetch(url, session):
+        tried.append(url)
+        if url == "https://down.test":
+            raise requests.HTTPError("403 Client Error")
+        return [entry(3)]
+
+    monkeypatch.setattr(bot, "fetch_entries", fake_fetch)
+    seen = {"alice": ["1"]}
+    s = session_with(response())
+    total = bot.run([feed(urls=["https://down.test", "https://up.test"])], seen, WEBHOOK, s,
+                    sleep=lambda _: None)
+    assert tried == ["https://down.test", "https://up.test"]
+    assert total == 1 and "3" in seen["alice"]
+
+
+def test_fallback_stops_at_first_working_url(monkeypatch):
+    tried = []
+    monkeypatch.setattr(bot, "fetch_entries", lambda url, s: tried.append(url) or [])
+    bot.run([feed(urls=["https://a.test", "https://b.test"])], {"alice": []}, WEBHOOK, MagicMock())
+    assert tried == ["https://a.test"]
+
+
+def test_all_urls_failing_skips_feed_without_crashing(monkeypatch, caplog):
+    def boom(url, session):
+        raise requests.ConnectionError("down")
+
+    monkeypatch.setattr(bot, "fetch_entries", boom)
+    seen = {"alice": ["1"]}
+    assert bot.run([feed(urls=["https://a.test", "https://b.test"])], seen, WEBHOOK, MagicMock()) == 0
+    assert seen == {"alice": ["1"]}
+    assert "all urls failed" in caplog.text

@@ -1,12 +1,13 @@
 # discord-x-bot
 
 Posts new tweets from a list of X accounts to a Discord channel as
-`fixupx.com` links, so videos play inline. Runs every 5 minutes on GitHub
+`fixupx.com` links, so videos play inline. Runs 3 times a day on GitHub
 Actions — no server, no X API.
 
-Tweets come from RSS feeds (RSS.app, RSSHub, Nitter, etc.). Any feed works as
+Tweets come from RSS feeds (Nitter, RSS.app, RSSHub, etc.). Any feed works as
 long as item links contain `/<handle>/status/<id>`. A feed can cover one account
-or many (an X List turned into a single RSS.app feed).
+or many (an X List). The current feed is an X List served by a public Nitter
+mirror (`<mirror>/i/lists/<list id>/rss`), with fallback mirrors.
 
 ## Setup
 
@@ -25,14 +26,18 @@ The workflow commits `seen.json` back to the repo after each run that changes it
 
 ### Schedule and Actions minutes
 
-The workflow runs every 5 minutes (`2-59/5 * * * *`), GitHub's minimum. A list
-feed only shows its newest ~20 tweets, so the more accounts on the list, the
-more often the bot needs to check. If a run logs "tweets may have been missed",
-the feed turned over faster than that; split the list into two feeds.
+The workflow runs 3 times a day: 8am, 1pm and 6pm Central Daylight Time
+(`7 13,18,23 * * *`). GitHub cron is UTC, so under Central Standard Time
+(Nov–Mar) the runs land an hour earlier (7am, noon, 5pm); shift the hours in
+`.github/workflows/poll.yml` if that matters. Each run posts everything new
+since the last one (up to 50 per feed).
 
-- **Public repo** (this one): Actions minutes are unlimited.
-- **Private repo**: the free tier is 2,000 minutes/month, which only covers
-  about `*/30 * * * *`. Change the cron in `.github/workflows/poll.yml`.
+The Nitter list feed holds roughly the last day and a half of tweets, so gaps of
+several hours between runs lose nothing. If a run logs "tweets may have been
+missed", the feed turned over between runs; run more often.
+
+Actions minutes are unlimited on public repos; 3 runs a day is also well inside
+the private-repo free tier.
 
 GitHub doesn't guarantee cron timing; runs are often a few minutes late, and
 scheduled workflows are disabled after 60 days without repo activity (the
@@ -40,9 +45,9 @@ scheduled workflows are disabled after 60 days without repo activity (the
 
 ### Reliable scheduling (Cloudflare Worker)
 
-GitHub's `schedule:` trigger can be late, skip runs, or (as with this repo) never
-fire at all. `worker/worker.js` is a Cloudflare Worker that starts the `poll`
-workflow every 5 minutes through GitHub's API. The GitHub cron stays in place;
+*Optional.* GitHub's `schedule:` trigger can be late or skip runs (this repo
+saw it fire only a few times a day on a 5-minute schedule). `worker/worker.js` is a Cloudflare Worker that starts the `poll`
+workflow through GitHub's API on Cloudflare's (more reliable) cron. The GitHub cron stays in place;
 if both fire, the workflow's concurrency group drops the extra run.
 
 1. **GitHub token**: github.com → Settings → Developer settings → Personal
@@ -59,11 +64,11 @@ if both fire, the workflow's concurrency group drops the extra run.
 3. **Add the secret**: the Worker's *Settings* → *Variables and Secrets* →
    *Add* → type **Secret**, name `GH_TOKEN`, value = the token.
 4. **Add the schedule**: *Settings* → *Triggers* → *Cron Triggers* → *Add* →
-   `*/5 * * * *`.
+   `7 13,18,23 * * *` (same times as the workflow).
 5. *(Optional)* *Settings* → *Domains & Routes* → disable the `workers.dev`
    URL. The Worker only acts on the cron, so it doesn't need one.
 
-Within ~5 minutes, runs should appear under *Actions* in this repo. If they
+After the next scheduled time, runs should appear under *Actions* in this repo. If they
 don't, check the Worker's logs (or the cron trigger's past events) in Cloudflare:
 failures say why, e.g. `HTTP 401 (token invalid or expired ...)`.
 
@@ -114,10 +119,11 @@ in each feed, so they would be posted twice.
 - A tweet is only marked seen after Discord accepts it, so failed posts are
   retried on the next run. On HTTP 429 the bot waits `retry_after` and retries
   (up to 3 attempts).
-- At most 10 posts per account per run. If more have piled up (e.g. after
-  downtime), the 10 newest are posted and the older ones are marked seen
+- At most 50 posts per feed per run. If more have piled up (e.g. after
+  downtime), the 50 newest are posted and the older ones are marked seen
   without posting.
-- A feed that fails to load is logged and skipped; the others still run.
+- A feed with several URLs tries them in order and uses the first that loads.
+  If all fail, it's logged and skipped; other feeds still run.
 - `seen.json` keeps the newest 500 IDs per account.
 
 ## Running locally

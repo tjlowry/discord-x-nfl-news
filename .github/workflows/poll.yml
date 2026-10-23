@@ -2,9 +2,10 @@ name: poll
 
 on:
   schedule:
-    # Every 5 min, offset from :00 (GitHub delays/drops runs most at the top of the hour).
-    # Public repo: minutes are free. Private: use "7-59/30 * * * *".
-    - cron: "2-59/5 * * * *"
+    # 3x/day: 8am, 1pm, 6pm Central Daylight Time (13:07, 18:07, 23:07 UTC).
+    # Cron is UTC, so under Central Standard Time (Nov–Mar) these land an hour
+    # earlier: 7am, noon, 5pm. Off the top of the hour, where GitHub delays runs most.
+    - cron: "7 13,18,23 * * *"
   workflow_dispatch:
 
 concurrency:
